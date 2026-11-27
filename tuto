@@ -1,0 +1,75 @@
+Il y a trois étapes : dire à Terraform où se trouve le miroir (une seule fois), déclarer le provider dans ton projet, puis lancer terraform init.
+
+1. Placer le miroir à un endroit fixe
+
+Après l'avoir poussé sur GitHub, clone le repo sur chaque machine qui doit s'en servir, à un chemin simple et sans espaces :
+
+powershell
+git clone https://github.com/<toi>/terraform-provider-restful C:\tools\terraform-provider-restful
+
+Le miroir se trouve alors dans C:\tools\terraform-provider-restful\terraform-mirror.
+
+2. Configurer Terraform (une seule fois par machine)
+
+Crée le fichier %APPDATA%\terraform.rc :
+
+powershell
+notepad "$env:APPDATA\terraform.rc"
+
+Puis colle ce contenu (avec des / dans le chemin, même sous Windows) :
+
+hcl
+provider_installation {
+  filesystem_mirror {
+    path    = "C:/tools/terraform-provider-restful/terraform-mirror"
+    include = ["registry.terraform.io/magodo/restful"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/magodo/restful"]
+  }
+}
+
+Avec cette config, magodo/restful vient toujours du miroir local, et tous les autres providers continuent de venir d'Internet. Si tu préfères ne pas toucher à la config globale, mets ce fichier dans le projet et définis $env:TF_CLI_CONFIG_FILE = "C:\chemin\terraform.rc" avant de lancer Terraform.
+
+3. Dans ton projet Terraform
+
+versions.tf :
+
+hcl
+terraform {
+  required_providers {
+    restful = {
+      source  = "magodo/restful"
+      version = "0.26.0"   # le miroir ne contient que cette version
+    }
+  }
+}
+
+main.tf, un exemple minimal pour une API REST qui crée un objet avec POST et renvoie son id :
+
+hcl
+provider "restful" {
+  base_url = "https://mon-api.local"
+  # security = { http = { token = { token = var.api_token } } }   # si l'API demande un token
+}
+
+resource "restful_resource" "exemple" {
+  path      = "/items"                    # POST /items pour créer
+  read_path = "$(path)/$(body.id)"        # GET /items/<id> pour lire
+  body = {
+    name = "test"
+  }
+}
+4. Lancer
+powershell
+terraform init
+terraform plan
+
+Pendant init, tu dois voir ces lignes :
+
+- Installing magodo/restful v0.26.0...
+- Installed magodo/restful v0.26.0 (unauthenticated)
+
+(unauthenticated) est normal : c'est la mention qui apparaît quand le provider vient d'un miroir local et non du registry. Si init signale un problème de checksum, supprime .terraform.lock.hcl et relance la commande terraform providers lock -fs-mirror=... donnée plus haut.
+
+D'autres exemples complets (Azure, MS Graph, Spotify, ThingsBoard…) se trouvent dans examples/usecases/ du repo. Tu peux t'en inspirer selon l'API que tu vises, et si tu me dis laquelle, je t'écris le main.tf qui va avec.
